@@ -1,6 +1,9 @@
 package io.github.yuxiximyxx.libraryplus.hook
 
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
+import android.view.ViewGroup
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
@@ -12,6 +15,8 @@ import java.io.File
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
+import kotlin.math.abs
+import kotlin.math.max
 
 /**
  * 资源库界面 com.hihonor.hiboard（magiclibrary 模块，部分类被混淆）。
@@ -37,6 +42,7 @@ internal object HiboardHooks {
         hookHiddenUseCase(targets.hiddenClass, targets.hiddenMethod)
         hookFolderTitle(targets.folderClass)
         hookSlideFromRight()
+        hookSwipeToClose()
     }
 
     // ------------------------------------------------------------------ DexKit
@@ -242,5 +248,107 @@ internal object HiboardHooks {
                 v.translationX = frac * w
                 p.args[0] = 0f
             })
+    }
+
+    // ------------------------------------------------------------------ 右滑关闭
+    private const val LIB_WORKSPACE = "com.hihonor.intelligent.feature.workspace.presentation.library.HiLibraryWorkSpace"
+
+    private var gDownX = 0f
+    private var gDownY = 0f
+    private var gDecided = false
+    private var gClosing = false
+    private var gDownTime = -1L
+
+    /**
+     * 资源库窗口根 HiLibraryWorkSpace：原生的关闭手势是“内容在顶部时下拉”，
+     * 由 BaseWorkSpace.onInterceptTouchEvent → determineStartScroll 拦截，再在 onTouchEvent 里按 Y 位移跟手、松手时按速度/进度吸附。
+     * 这里把“手指从左往右”的横向手势换算成等量的下拉（Y = 按下点 + 右移距离），
+     * 并让 determineStartScroll 在这种手势下直接返回 true，从而复用原生的跟手 + 吸附 + 关闭流程。
+     */
+    private fun hookSwipeToClose() {
+        val ws = try {
+            XposedHelpers.findClass(LIB_WORKSPACE, cl)
+        } catch (t: Throwable) {
+            synchronized(HookReport) { HookReport.failed += "HiLibraryWorkSpace(class)" }
+            Lg.e("HiLibraryWorkSpace not found", t)
+            return
+        }
+        safe("HiLibraryWorkSpace.dispatchTouchEvent(swipeRightToClose)") {
+            XposedHelpers.findAndHookMethod(ws, "dispatchTouchEvent", MotionEvent::class.java,
+                before("libDispatchTouchEvent") { p ->
+                    val ev = p.args[0] as? MotionEvent ?: return@before
+                    val v = p.thisObject as ViewGroup
+                    when (ev.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            gDownX = ev.x; gDownY = ev.y; gDownTime = ev.downTime
+                            gDecided = false; gClosing = false
+                            return@before
+                        }
+                    }
+                    if (ev.downTime != gDownTime) return@before
+                    if (!gClosing && !gDecided && ev.actionMasked == MotionEvent.ACTION_MOVE) {
+                        if (!cfg.rightEntry) { gDecided = true; return@before }
+                        val dx = ev.x - gDownX
+                        val dy = ev.y - gDownY
+                        val slop = ViewConfiguration.get(v.context).scaledTouchSlop.toFloat()
+                        if (dx > slop * 1.5f && dx > abs(dy) * 1.5f) {
+                            gDecided = true
+                            val why = blockReason(v, ev)
+                            if (why != null) {
+                                Lg.i("swipeClose: skip ($why) dx=$dx dy=$dy")
+                            } else {
+                                gClosing = true
+                                v.requestDisallowInterceptTouchEvent(false)
+                                Lg.i("swipeClose: START dx=$dx dy=$dy")
+                            }
+                        } else if (abs(dy) > slop * 1.5f || dx < -slop * 1.5f) {
+                            gDecided = true // 纵向滚动 / 反方向：不处理
+                            Lg.d("swipeClose: not horizontal-right, ignore dx=$dx dy=$dy")
+                        }
+                    }
+                    if (gClosing) {
+                        val c = MotionEvent.obtain(ev)
+                        c.setLocation(gDownX, gDownY + max(0f, ev.x - gDownX))
+                        p.args[0] = c
+                        if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL) {
+                            Lg.i("swipeClose: release dx=${ev.x - gDownX}")
+                            gClosing = false
+                        }
+                    }
+                })
+        }
+        safe("HiLibraryWorkSpace.determineStartScroll(swipeRightToClose)") {
+            XposedHelpers.findAndHookMethod(ws, "determineStartScroll", MotionEvent::class.java,
+                before("determineStartScroll") { p ->
+                    if (gClosing) p.result = true
+                })
+        }
+    }
+
+    /** 返回不应接管的原因；null 表示可以关闭 */
+    private fun blockReason(root: View, ev: MotionEvent): String? {
+        if (ev.pointerCount > 1) return "multi touch"
+        // 菜单展开 / 拖动文件夹（HiLibraryWorkSpace 的 isOpenMenu / isFolderDragIng，混淆名 k / l）
+        for ((name, label) in listOf("isOpenMenu" to "menu open", "k" to "menu open", "isFolderDragIng" to "folder dragging", "l" to "folder dragging")) {
+            try {
+                val f = XposedHelpers.findField(root.javaClass, name)
+                if (f.type == Boolean::class.javaPrimitiveType && f.getBoolean(root)) return label
+            } catch (_: Throwable) {
+            }
+        }
+        // 展开的文件夹内左右翻页优先
+        if (findShown(root, "ExpandFolderView", 0)) return "expanded folder shown"
+        return null
+    }
+
+    private fun findShown(v: View, simpleName: String, depth: Int): Boolean {
+        if (depth > 40) return false
+        if (v.javaClass.simpleName == simpleName && v.isShown) return true
+        if (v is ViewGroup) {
+            for (i in 0 until v.childCount) {
+                if (findShown(v.getChildAt(i) ?: continue, simpleName, depth + 1)) return true
+            }
+        }
+        return false
     }
 }

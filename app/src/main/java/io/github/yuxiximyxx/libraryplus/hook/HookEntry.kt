@@ -14,7 +14,7 @@ class HookEntry : IXposedHookLoadPackage {
         // 只处理主进程（资源库 LauncherOverlayService 在 hiboard 主进程）
         if (lpparam.processName != pkg) return
         try {
-            Lg.i("load $pkg (${lpparam.processName})")
+            Lg.d("load $pkg (${lpparam.processName})")
             HookConfig.loadEarly()
             safe("Instrumentation.callApplicationOnCreate") {
                 XposedHelpers.findAndHookMethod(
@@ -32,6 +32,7 @@ class HookEntry : IXposedHookLoadPackage {
                 Const.LAUNCHER_PKG -> LauncherHooks.install(lpparam.classLoader)
                 Const.HIBOARD_PKG -> HiboardHooks.install(lpparam)
             }
+            Lg.i(HookReport.summary(pkg) + " (module ${BuildInfo.VERSION})")
         } catch (t: Throwable) {
             Lg.e("handleLoadPackage failed for $pkg", t)
         }

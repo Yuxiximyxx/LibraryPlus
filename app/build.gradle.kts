@@ -20,8 +20,8 @@ android {
         applicationId = "io.github.yuxiximyxx.libraryplus"
         minSdk = 31
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
@@ -50,7 +50,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     packaging {
         resources.excludes += listOf("META-INF/*.version", "META-INF/*.kotlin_module", "META-INF/LICENSE*", "META-INF/NOTICE*", "kotlin/**", "DebugProbesKt.bin")
         jniLibs.useLegacyPackaging = false
@@ -69,5 +69,5 @@ dependencies {
     compileOnly("de.robv.android.xposed:api:82")
     implementation("org.luckypray:dexkit:2.3.0")
     implementation("top.yukonga.miuix.kmp:miuix-android:0.8.8")
-    implementation("androidx.activity:activity-compose:1.11.0")
+    implementation("androidx.activity:activity-compose:1.12.4")
 }
