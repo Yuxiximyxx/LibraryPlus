@@ -61,7 +61,7 @@ object ConfigStore {
     }
 
     private fun broadcast(ctx: Context, json: String) {
-        for (pkg in listOf(Const.LAUNCHER_PKG, Const.HIBOARD_PKG)) {
+        for (pkg in Const.SCOPE_PKGS) {
             try {
                 ctx.sendBroadcast(
                     Intent(Const.ACTION_CHANGED)
@@ -74,5 +74,14 @@ object ConfigStore {
             }
         }
         pending = null
+    }
+
+    /** 发送一个只有本模块能发出的广播（接收方注册时要求 PERMISSION）。 */
+    fun sendSigned(ctx: Context, action: String, pkg: String) {
+        try {
+            ctx.sendBroadcast(Intent(action).setPackage(pkg).addFlags(Intent.FLAG_RECEIVER_FOREGROUND))
+        } catch (t: Throwable) {
+            Log.w(Const.TAG, "broadcast $action to $pkg failed", t)
+        }
     }
 }

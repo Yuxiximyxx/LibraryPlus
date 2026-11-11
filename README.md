@@ -3,11 +3,11 @@
 荣耀 MagicOS 桌面「资源库」增强 LSPosed 模块。
 
 - 包名：`io.github.yuxiximyxx.libraryplus`
-- 作用域：`com.hihonor.android.launcher`（系统桌面）、`com.hihonor.hiboard`（资源库界面）
-- 适配版本：桌面 18.0.0.331、资源库（hiboard）11.1.4.302；其它版本尽量通过 DexKit 自动适配
+- 作用域：`com.hihonor.android.launcher`（系统桌面）、`com.hihonor.hiboard`（资源库界面）、`com.hihonor.search`（荣耀搜索）
+- 适配版本：桌面 18.0.0.331、资源库（hiboard）11.1.4.302、荣耀搜索 10.0.37.301；其它版本尽量通过 DexKit 自动适配
 - 日志 TAG：`LibraryPlus`（`adb logcat -s LibraryPlus`，也会写入 LSPosed 日志）。每个进程加载后输出一行：`LibraryPlus loaded in <包名>, hooks ok: [...], failed: [...]`
 
-## 功能（v0.1.0）
+## 功能（v0.1.2）
 
 | 功能 | 说明 |
 | --- | --- |
@@ -16,14 +16,19 @@
 | 自定义分类 | 把任意应用放进指定的系统分类（社交通讯、游戏……） |
 | 桌面右侧进入 | 在桌面最后一页任意空白处向左滑即可打开资源库，像是桌面最右边的一页；在资源库任意位置向右滑即可关闭并回到桌面 |
 | 从右侧滑入动画 | 资源库改为从右往左滑入（可选） |
-| 保留上滑进入 | 开启右侧进入后，可选择关闭原来的上滑进入 |
+| 上滑打开荣耀搜索 | 开启右侧进入后，原来上滑进入资源库的位置改为打开荣耀搜索 |
+| 自定义分类显示真实分类 | 资源库分类时把每个应用的系统分类上报给模块，列表显示「当前：xx」 |
+| 重启作用域 | 一键重启桌面、资源库、荣耀搜索（免 root：模块广播让进程自行结束；可选 root：`am force-stop`），并显示各进程 hook「已生效 x/y」 |
+| 荣耀搜索 · 净化 | 请求时关闭广告与个性化；按卡片类型隐藏结果页广告 / 推荐应用 / 推荐资讯 / 热搜 / 横幅 / 置顶内容 / 三方应用 / AI / 服务卡片 / 满意度调查；隐藏首页热搜 / 横幅 / 信息流 / 历史；搜索框暗词默认 / 隐藏 / 固定文字；隐藏 AI 入口 |
+| 荣耀搜索 · 搜索范围 | 每个本地来源（备忘录、信息、联系人、设置、日历、文件、邮件、图库、收藏、应用内服务、小红书、大众点评）跟随系统 / 强制开 / 强制关；结果页标签隐藏（实验性） |
+| 荣耀搜索 · 搜索引擎 | 跟随系统 / 百度 / Bing / Google / 自定义 URL 模板（`{$query}` 为搜索词）；可选在外部浏览器打开网页结果 |
 
-修改设置后自动保存，并通知桌面刷新资源库。
+修改设置后自动保存，并通知桌面、资源库和荣耀搜索。
 
 ## 使用
 
-1. 在 LSPosed 中启用模块，勾选「系统桌面」和「资源库」（hiboard）。
-2. 重启桌面与资源库（或重启手机）。
+1. 在 LSPosed 中启用模块，勾选「系统桌面」「资源库」（hiboard）和「荣耀搜索」。
+2. 重启手机，或在模块里点「重启作用域」。
 3. 打开 LibraryPlus 进行设置。
 
 > 需要 LSPosed（支持 new-xshared）。配置同时通过 XSharedPreferences、ContentProvider 与广播三种方式同步，任一可用即可生效。
@@ -61,7 +66,15 @@ keyPassword=******
   - 文件夹模型（`FolderAppsCategory`）标题 getter：返回自定义名称
   - `MainView.setTranslationY()`：开启右侧滑入时换成横向位移
   - `HiLibraryWorkSpace.dispatchTouchEvent()` / `determineStartScroll()`：向右的横向手势换算成下拉，复用原生的下拉关闭（跟手 + 吸附）
-- 所有 hook 都包在 try/catch 中，失败只记日志，不影响桌面与资源库运行。
+- 桌面 `HiBoardUtil.scrollToHiLibrary(ev, up)`：开启「上滑打开荣耀搜索」后调用 `Launcher.handleClickViewEnterSearchEvent()`（与点击桌面搜索图标同一路径），失败时用 `honorsearch://com.hihonor.search/home` 兜底
+- 荣耀搜索（R8 全混淆，模型 / Strategy / View 类名保留）
+  - `GeneralDataReq` / `HomeHotSearchReq` 构造：supportAd=false、supportActivationAd=0、isPersonalizedClosed=true
+  - 综合 tab 各 `*Strategy` 创建 / 绑定 ViewHolder 时折叠对应卡片；首页楼层按布局名折叠（`LayoutInflater.inflate`）
+  - `DarkWordViewSwitcher`：清空暗词列表 / 显示固定文字
+  - 搜索范围：`setting_save_file` 中的开关（SharedPreferences）、MMKV 中的小红书 / 点评开关，以及 DexKit 定位的本地搜索源列表方法
+  - `SearchEngine.getUrl/getWebTabUrl/getCombineTabUrl` 返回自定义模板；`WebDetailActivity` 可转交外部浏览器
+  - `ResultModel$Tab` 构造时过滤标签（实验性）
+- 所有 hook 都包在 try/catch 中，失败只记日志，不影响桌面、资源库与荣耀搜索运行。
 
 ## 已知限制
 

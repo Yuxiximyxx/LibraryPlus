@@ -3,5 +3,6 @@
     <string-array name="xposed_scope">
         <item>com.hihonor.android.launcher</item>
         <item>com.hihonor.hiboard</item>
+        <item>com.hihonor.search</item>
     </string-array>
 </resources>

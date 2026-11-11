@@ -14,6 +14,9 @@ import io.github.yuxiximyxx.libraryplus.ui.HiddenAppsScreen
 import io.github.yuxiximyxx.libraryplus.ui.HomeScreen
 import io.github.yuxiximyxx.libraryplus.ui.MappingScreen
 import io.github.yuxiximyxx.libraryplus.ui.RenameScreen
+import io.github.yuxiximyxx.libraryplus.ui.SearchCleanScreen
+import io.github.yuxiximyxx.libraryplus.ui.SearchEngineScreen
+import io.github.yuxiximyxx.libraryplus.ui.SearchScopeScreen
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
@@ -36,6 +39,9 @@ class MainActivity : ComponentActivity() {
                     "hidden" -> HiddenAppsScreen(cfg, update, back)
                     "rename" -> RenameScreen(cfg, update, back)
                     "mapping" -> MappingScreen(cfg, update, back)
+                    "search_clean" -> SearchCleanScreen(cfg, update, back)
+                    "search_scope" -> SearchScopeScreen(cfg, update, back)
+                    "search_engine" -> SearchEngineScreen(cfg, update, back)
                     else -> HomeScreen(cfg, ConfigStore.xsharedAvailable, update) { page = it }
                 }
             }

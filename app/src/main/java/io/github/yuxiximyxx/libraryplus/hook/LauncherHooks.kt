@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.net.Uri
 import android.provider.Settings
 import android.view.MotionEvent
 import de.robv.android.xposed.XposedHelpers
@@ -40,11 +41,15 @@ internal object LauncherHooks {
         cl = classLoader
         hookAllAppList()
         hookRightEntry()
+        hookSwipeUpSearch()
         HookConfig.addListener { refreshLibrary() }
     }
 
     fun onAppCreated(ctx: Context) {
         appContext = ctx
+        // 重启作用域：桌面最后退出，让资源库 / 搜索先结束
+        HookConfig.restartDelayMs = 600L
+        HookConfig.onRequestCategories = { refreshLibrary() }
     }
 
     // ------------------------------------------------------------------ 隐藏应用
@@ -192,8 +197,6 @@ internal object LauncherHooks {
                             }
                         }
                     }
-                    // 可选：关闭原来的上滑进入（仅在开启右侧进入时生效，避免资源库无法进入）
-                    if (!c.keepSwipeUp) p.result = false
                 })
         }
 
@@ -274,6 +277,61 @@ internal object LauncherHooks {
                 before("onInterceptTouchEvent") { p ->
                     if (rightMode && p.args[1] == 0) rightMode = false
                 })
+        }
+    }
+
+    // ------------------------------------------------------------------ 上滑打开荣耀搜索
+    private var searchDownTime = -1L
+
+    /**
+     * DragLayer.handleResourceLibEnter → isScrollToHiLibrary → HiBoardUtil.scrollToHiLibrary(ev, up)。
+     * 原生的所有前置判断（资源库开关、多指、文件夹、拖动、小部件区域、10dp 阈值）都已在它之前完成，
+     * 所以在这里把“上滑进入资源库”替换为“打开荣耀搜索”，返回 true 让 DragLayer 拦截本次手势。
+     * 我们自己的右侧入口在调用前会置 rightMode=true，不受影响。
+     */
+    private fun hookSwipeUpSearch() = safe("HiBoardUtil.scrollToHiLibrary(swipeUpSearch)") {
+        XposedHelpers.findAndHookMethod(HIBOARD_UTIL, cl, "scrollToHiLibrary", MotionEvent::class.java, Boolean::class.javaPrimitiveType,
+            before("scrollToHiLibrary") { p ->
+                if (rightMode || !cfg.swipeUpSearchActive) return@before
+                if (p.args[1] != true) return@before
+                val ev = p.args[0] as? MotionEvent ?: return@before
+                if (searchDownTime != ev.downTime) {
+                    searchDownTime = ev.downTime
+                    main.post { openSearch() }
+                }
+                p.result = true
+            })
+    }
+
+    private fun openSearch() {
+        try {
+            val launcherCls = XposedHelpers.findClass("$P.Launcher", cl)
+            val launcher = XposedHelpers.callStaticMethod(launcherCls, "getLauncher")
+            val enabled = try {
+                XposedHelpers.callStaticMethod(XposedHelpers.findClass("$P.unlock.LauncherPackageManager", cl), "isPackageUpdateEnable", "com.hihonor.search") == true
+            } catch (t: Throwable) {
+                Lg.e("isPackageUpdateEnable failed", t); true
+            }
+            if (launcher != null && enabled) {
+                XposedHelpers.callMethod(launcher, "handleClickViewEnterSearchEvent")
+                Lg.i("swipeUpSearch: handleClickViewEnterSearchEvent")
+                return
+            }
+            Lg.i("swipeUpSearch: launcher=${launcher != null} searchEnabled=$enabled, use intent fallback")
+        } catch (t: Throwable) {
+            Lg.e("swipeUpSearch: handleClickViewEnterSearchEvent failed, use intent fallback", t)
+        }
+        try {
+            val ctx = appContext ?: return
+            ctx.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse("honorsearch://com.hihonor.search/home"))
+                    .setPackage("com.hihonor.search")
+                    .putExtra("from", "launcher_search_icon")
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            )
+            Lg.i("swipeUpSearch: started honorsearch://com.hihonor.search/home")
+        } catch (t: Throwable) {
+            Lg.e("swipeUpSearch: start activity failed", t)
         }
     }
 

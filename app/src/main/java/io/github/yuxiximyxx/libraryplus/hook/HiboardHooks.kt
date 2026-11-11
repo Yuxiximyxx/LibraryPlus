@@ -1,5 +1,8 @@
 package io.github.yuxiximyxx.libraryplus.hook
 
+import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -43,6 +46,40 @@ internal object HiboardHooks {
         hookFolderTitle(targets.folderClass)
         hookSlideFromRight()
         hookSwipeToClose()
+    }
+
+    fun onAppCreated(ctx: Context) {
+        HookConfig.onRequestCategories = { scheduleCategoryReport(0L) }
+    }
+
+    // ------------------------------------------------------------------ 真实分类上报
+    /** 包名 → hiboard 原始分类（101–112），供模块“自定义分类”页显示 */
+    private val categories = HashMap<String, Int>()
+    private val main = Handler(Looper.getMainLooper())
+    private val reportRunnable = Runnable { sendCategories() }
+
+    private fun recordCategory(pkg: String, folderType: Int) {
+        if (folderType !in Const.FOLDER_IDS) return
+        val changed = synchronized(categories) { categories.put(pkg, folderType) != folderType }
+        if (changed) scheduleCategoryReport(2000L)
+    }
+
+    private fun scheduleCategoryReport(delay: Long) {
+        main.removeCallbacks(reportRunnable)
+        main.postDelayed(reportRunnable, delay)
+    }
+
+    private fun sendCategories() {
+        val ctx = HookConfig.appContext ?: return
+        val json = synchronized(categories) { JSONObject(categories as Map<*, *>).toString() }
+        if (json == "{}") {
+            Lg.i("categories: nothing collected yet (open the resource library once)")
+            return
+        }
+        Thread({
+            HookConfig.callProvider(ctx, Const.METHOD_PUT_CATEGORIES, json)
+            Lg.i("categories reported: ${synchronized(categories) { categories.size }} apps")
+        }, "LibraryPlus-cat").start()
     }
 
     // ------------------------------------------------------------------ DexKit
@@ -154,8 +191,9 @@ internal object HiboardHooks {
         val method = cls.declaredMethods.first { it.name == "collectAppByFolderType" && it.parameterTypes.size == 3 }
         XposedBridge.hookMethod(method, before("collectAppByFolderType") { p ->
             val c = cfg
-            if (c.hidden.isEmpty() && c.mapping.isEmpty()) return@before
             val pkg = packageOf(p.args[0] ?: return@before) ?: return@before
+            (p.args[1] as? Int)?.let { recordCategory(pkg, it) }
+            if (c.hidden.isEmpty() && c.mapping.isEmpty()) return@before
             if (pkg in c.hidden) {
                 p.result = null
                 return@before

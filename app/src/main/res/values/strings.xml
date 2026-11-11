@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">LibraryPlus</string>
-    <string name="xposed_description">荣耀桌面资源库增强：隐藏应用、文件夹改名、自定义分类、从桌面右侧进入资源库</string>
+    <string name="xposed_description">荣耀桌面资源库增强：隐藏应用、文件夹改名、自定义分类、从桌面右侧进入资源库、上滑打开荣耀搜索；荣耀搜索去广告、改搜索范围与搜索引擎</string>
 </resources>
