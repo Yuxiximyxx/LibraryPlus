@@ -478,39 +478,99 @@ internal object SearchHooks {
         })
     }
 
-    // ================================================================== 结果页标签（实验性）
-    private fun hookTabs() = safe("ResultModel\$Tab.<init>(hideTabs)") {
-        val tabCls = XposedHelpers.findClass("$S.feature.resultpage.domain.model.ResultModel\$Tab", cl)
-        val modelCls = XposedHelpers.findClass("$S.feature.resultpage.domain.model.TabModel", cl)
-        val idField = modelCls.declaredFields.first { it.type == Long::class.javaPrimitiveType && !Modifier.isStatic(it.modifiers) }.apply { isAccessible = true }
-        // 静态 copy(TabModel, boolean, int index, padding, int mask)
-        val copy = modelCls.declaredMethods.firstOrNull { m ->
-            val pt = m.parameterTypes
-            Modifier.isStatic(m.modifiers) && m.returnType == modelCls && pt.size == 5 && pt[0] == modelCls &&
-                pt[1] == Boolean::class.javaPrimitiveType && pt[2] == Int::class.javaPrimitiveType && pt[4] == Int::class.javaPrimitiveType
-        }?.apply { isAccessible = true }
-        val ctors = tabCls.declaredConstructors.filter { c ->
-            val pt = c.parameterTypes
-            pt.size == 5 && pt[1] == modelCls && List::class.java.isAssignableFrom(pt[2])
+    // ================================================================== 结果页标签
+    private const val TAB_LOCAL = 0L
+
+    /**
+     * 结果页 = 标签栏（ResultModel$Tab，TabStrategy 渲染）+ 内容 ViewPager2（ResultModel$TabContent，TabContentStrategy 渲染）。
+     * 两者构造参数都是 (Query, TabModel 选中项, List<TabModel> 全部标签, padding[, boolean])。
+     * - 只保留本机：两个列表都只留 id=0（本机），选中项改成本机 → 内容页只有本机一页，默认就显示本机；标签栏整行折叠。
+     * - 否则按 hideTabs 去掉指定标签（实验性）。
+     * TabModel：第一个 long 字段 = id（0 本机、1 综合、2 YOYO/AI、6 AI 搜索、3 网页、4 应用、5 游戏、100 小红书）；
+     * 静态 copy(TabModel, selected:Z, index:I, padding, mask:I)，mask 中 bit4=保留原 selected、bit8=保留原 index。
+     */
+    private fun hookTabs() {
+        val modelCls: Class<*>
+        val idField: java.lang.reflect.Field
+        val copy: Method?
+        try {
+            modelCls = XposedHelpers.findClass("$S.feature.resultpage.domain.model.TabModel", cl)
+            idField = modelCls.declaredFields.first { it.type == Long::class.javaPrimitiveType && !Modifier.isStatic(it.modifiers) }.apply { isAccessible = true }
+            copy = modelCls.declaredMethods.firstOrNull { m ->
+                val pt = m.parameterTypes
+                Modifier.isStatic(m.modifiers) && m.returnType == modelCls && pt.size == 5 && pt[0] == modelCls &&
+                    pt[1] == Boolean::class.javaPrimitiveType && pt[2] == Int::class.javaPrimitiveType && pt[4] == Int::class.javaPrimitiveType
+            }?.apply { isAccessible = true }
+            if (copy == null) Lg.e("TabModel.copy not found; tabs are filtered without re-indexing")
+        } catch (t: Throwable) {
+            synchronized(HookReport) { HookReport.failed += "TabModel" }
+            Lg.e("TabModel not found", t)
+            return
         }
-        require(ctors.isNotEmpty()) { "ctor not found" }
-        ctors.forEach { c ->
-            XposedBridge.hookMethod(c, before("ResultTab") { p ->
-                val hide = sc.hideTabs
-                if (hide.isEmpty()) return@before
-                val tabs = p.args[2] as? List<*> ?: return@before
-                val selectedId = p.args[1]?.let { idField.getLong(it) }
-                val kept = tabs.filter { t -> t == null || !modelCls.isInstance(t) || idField.getLong(t).let { id -> id == selectedId || !(id in hide || (id == 6L && 2L in hide)) } }
-                if (kept.size == tabs.size) return@before
-                // 重新编号 index（mask 里去掉 bit 8 = 不保留 index）
-                val reindexed = if (copy != null) kept.mapIndexed { idx, t ->
-                    if (t != null && modelCls.isInstance(t)) copy.invoke(null, t, false, idx, null, 0xFF xor 8) else t
-                } else kept
-                p.args[2] = ArrayList(reindexed)
-                if (copy != null && selectedId != null) {
-                    reindexed.firstOrNull { it != null && modelCls.isInstance(it) && idField.getLong(it) == selectedId }?.let { p.args[1] = it }
+
+        fun idOf(t: Any?): Long? = if (t != null && modelCls.isInstance(t)) idField.getLong(t) else null
+
+        /** 过滤 args[2]，必要时替换 args[1]（选中项） */
+        fun filter(p: de.robv.android.xposed.XC_MethodHook.MethodHookParam) {
+            val s = sc
+            val tabs = p.args[2] as? List<*> ?: return
+            val selectedId = idOf(p.args[1])
+            val kept: List<Any?>
+            val newSelectedId: Long?
+            if (s.onlyLocal) {
+                if (tabs.none { idOf(it) == TAB_LOCAL }) return // 没有本机标签（不应发生），保持原样
+                kept = tabs.filter { idOf(it) == TAB_LOCAL }
+                newSelectedId = TAB_LOCAL
+            } else {
+                val hide = s.hideTabs
+                if (hide.isEmpty()) return
+                kept = tabs.filter { t ->
+                    val id = idOf(t) ?: return@filter true
+                    id == selectedId || !(id in hide || (id == 6L && 2L in hide))
                 }
-            })
+                newSelectedId = selectedId
+            }
+            if (kept.size == tabs.size && newSelectedId == selectedId) return
+            val rebuilt = if (copy != null) kept.mapIndexed { idx, t ->
+                val id = idOf(t) ?: return@mapIndexed t
+                // 不保留 selected(4) 与 index(8)，由我们重新给出
+                copy.invoke(null, t, id == newSelectedId, idx, null, 0xFF xor 8 xor 4)
+            } else kept
+            p.args[2] = ArrayList(rebuilt)
+            rebuilt.firstOrNull { idOf(it) == newSelectedId }?.let { p.args[1] = it }
+        }
+
+        for (name in listOf("ResultModel\$Tab", "ResultModel\$TabContent")) {
+            safe("$name.<init>(tabs)") {
+                val cls = XposedHelpers.findClass("$S.feature.resultpage.domain.model.$name", cl)
+                val ctors = cls.declaredConstructors.filter { c ->
+                    val pt = c.parameterTypes
+                    pt.size in 4..5 && pt[1] == modelCls && List::class.java.isAssignableFrom(pt[2])
+                }
+                require(ctors.isNotEmpty()) { "ctor not found" }
+                ctors.forEach { c -> XposedBridge.hookMethod(c, before("tabs") { p -> filter(p) }) }
+            }
+        }
+
+        // 只保留本机时折叠整行标签栏
+        safe("TabStrategy(hideTabRow)") {
+            val vh = XposedHelpers.findClass(VIEW_HOLDER, cl)
+            val cls = XposedHelpers.findClass("$S.feature.resultpage.presentation.adapter.strategy.TabStrategy", cl)
+            var n = 0
+            for (m in cls.declaredMethods) {
+                if (Modifier.isStatic(m.modifiers) || Modifier.isAbstract(m.modifiers)) continue
+                val pt = m.parameterTypes
+                val isCreate = pt.size == 2 && pt[0] == ViewGroup::class.java && pt[1] == Int::class.javaPrimitiveType && vh.isAssignableFrom(m.returnType)
+                val isBind = pt.isNotEmpty() && vh.isAssignableFrom(pt[0])
+                if (!isCreate && !isBind) continue
+                XposedBridge.hookMethod(m, after("tabRow") { p ->
+                    val holder = if (isCreate) p.result else p.args[0]
+                    val item = holder?.let { XposedHelpers.getObjectField(it, "itemView") } as? View ?: return@after
+                    if (sc.onlyLocal) collapse(item) else expand(item)
+                })
+                n++
+            }
+            require(n > 0) { "no create/bind method" }
         }
     }
 

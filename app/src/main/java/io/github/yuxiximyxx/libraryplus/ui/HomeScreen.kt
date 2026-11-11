@@ -72,6 +72,12 @@ fun HomeScreen(
                     onClick = { open("rename") },
                 )
                 SuperArrow(
+                    title = "新建分类",
+                    summary = if (cfg.customFolders.isEmpty()) "在系统分类之外新建自己的分类"
+                    else "已创建 ${cfg.customFolders.size} 个：" + cfg.customFolders.joinToString("、") { it.name },
+                    onClick = { open("folders") },
+                )
+                SuperArrow(
                     title = "自定义分类",
                     summary = if (cfg.mapping.isEmpty()) "全部按系统分类" else "已调整 ${cfg.mapping.size} 个应用",
                     onClick = { open("mapping") },
@@ -114,7 +120,8 @@ fun HomeScreen(
                 )
                 SuperArrow(
                     title = "搜索范围",
-                    summary = if (s.scope.isEmpty() && s.hideTabs.isEmpty()) "全部跟随系统" else "已调整 ${s.scope.size} 个来源" + (if (s.hideTabs.isNotEmpty()) " · 隐藏 ${s.hideTabs.size} 个标签" else ""),
+                    summary = (if (s.scope.isEmpty()) "来源跟随系统" else "已调整 ${s.scope.size} 个来源") +
+                        (if (s.onlyLocal) " · 只看本机" else if (s.hideTabs.isNotEmpty()) " · 隐藏 ${s.hideTabs.size} 个标签" else ""),
                     onClick = { open("search_scope") },
                 )
                 SuperArrow(

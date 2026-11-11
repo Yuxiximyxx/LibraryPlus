@@ -142,19 +142,27 @@ fun SearchScopeScreen(cfg: LpConfig, update: ((LpConfig) -> LpConfig) -> Unit, o
                 }
             }
         }
-        item { SmallTitle("结果页标签（实验性）") }
+        item { SmallTitle("结果页标签") }
         item {
             Card(Modifier.padding(horizontal = 12.dp).fillMaxWidth()) {
+                SuperSwitch(
+                    title = "只看本机结果",
+                    summary = "去掉顶部整行标签（本机、综合、YOYO、网页、应用、游戏…），搜索后直接显示本机结果",
+                    checked = s.onlyLocal,
+                    onCheckedChange = { v -> update { c -> c.withSearch { it.copy(onlyLocal = v) } } },
+                )
                 SearchKeys.TABS.forEach { (id, name) ->
                     SuperSwitch(
-                        title = "隐藏「$name」",
-                        checked = id in s.hideTabs,
+                        title = "隐藏「$name」（实验性）",
+                        summary = if (s.onlyLocal) "已开启“只看本机结果”" else null,
+                        checked = s.onlyLocal || id in s.hideTabs,
+                        enabled = !s.onlyLocal,
                         onCheckedChange = { v -> update { c -> c.withSearch { it.copy(hideTabs = if (v) it.hideTabs + id else it.hideTabs - id) } } },
                     )
                 }
             }
         }
-        item { Footnote("“跟随系统”使用荣耀搜索自己的设置。强制开启只对已安装的应用有效。标签隐藏为实验功能，如遇异常请关闭。") }
+        item { Footnote("“跟随系统”使用荣耀搜索自己的设置。强制开启只对已安装的应用有效。单独隐藏某个标签为实验功能，如遇异常请关闭。") }
     }
 }
 

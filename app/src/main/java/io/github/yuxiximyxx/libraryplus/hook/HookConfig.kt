@@ -50,7 +50,7 @@ internal object HookConfig {
         if (candidate == null) return false
         if (!force && candidate.ts < cfg.ts) return false
         cfg = candidate
-        Lg.i("config loaded from $source: hidden=${candidate.hidden.size} names=${candidate.folderNames.size} mapping=${candidate.mapping.size} right=${candidate.rightEntry}")
+        Lg.i("config loaded from $source: hidden=${candidate.hidden.size} names=${candidate.folderNames.size} mapping=${candidate.mapping.size} customFolders=${candidate.customFolders.size} right=${candidate.rightEntry}")
         return true
     }
 

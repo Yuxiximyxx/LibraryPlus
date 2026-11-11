@@ -10,6 +10,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import io.github.yuxiximyxx.libraryplus.ui.CustomFoldersScreen
+import io.github.yuxiximyxx.libraryplus.ui.FolderDetailScreen
 import io.github.yuxiximyxx.libraryplus.ui.HiddenAppsScreen
 import io.github.yuxiximyxx.libraryplus.ui.HomeScreen
 import io.github.yuxiximyxx.libraryplus.ui.MappingScreen
@@ -33,9 +35,15 @@ class MainActivity : ComponentActivity() {
             val update: ((LpConfig) -> LpConfig) -> Unit = { f -> cfg = ConfigStore.save(this, f(cfg)) }
 
             MiuixTheme(controller = controller) {
-                BackHandler(enabled = page != "home") { page = "home" }
+                BackHandler(enabled = page != "home") { page = if (page.startsWith("folder:")) "folders" else "home" }
                 val back = { page = "home" }
-                when (page) {
+                when {
+                    page.startsWith("folder:") -> {
+                        val id = page.removePrefix("folder:").toIntOrNull() ?: -1
+                        FolderDetailScreen(id, cfg, update) { page = "folders" }
+                    }
+                    page == "folders" -> CustomFoldersScreen(cfg, update, open = { page = it }, onBack = back)
+                    else -> when (page) {
                     "hidden" -> HiddenAppsScreen(cfg, update, back)
                     "rename" -> RenameScreen(cfg, update, back)
                     "mapping" -> MappingScreen(cfg, update, back)
@@ -43,6 +51,7 @@ class MainActivity : ComponentActivity() {
                     "search_scope" -> SearchScopeScreen(cfg, update, back)
                     "search_engine" -> SearchEngineScreen(cfg, update, back)
                     else -> HomeScreen(cfg, ConfigStore.xsharedAvailable, update) { page = it }
+                    }
                 }
             }
         }

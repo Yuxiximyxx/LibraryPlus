@@ -184,7 +184,9 @@ internal object HiboardHooks {
     /**
      * DealAppIFolderInfoStrategy.collectAppByFolderType(appResource, folderType, map)
      * - 隐藏：直接跳过（不放进任何文件夹）
-     * - 自定义分类：替换 folderType（只替换 101–112 之间的普通分类）
+     * - 自定义分类：替换 folderType（只替换 101–112 之间的普通分类）；
+     *   目标可以是 101–112，也可以是新建分类（1001+），后者由原生代码按 id 新建文件夹
+     *   （r.e(id) 返回 -1 → 文件夹名使用 customFolderName，再由标题 hook 提供名称）。
      */
     private fun hookCollectAppByFolderType() = safe("DealAppIFolderInfoStrategy.collectAppByFolderType") {
         val cls = XposedHelpers.findClass(DEAL_FOLDER, cl)
@@ -200,8 +202,9 @@ internal object HiboardHooks {
             }
             val target = c.mapping[pkg] ?: return@before
             val orig = p.args[1] as? Int ?: return@before
-            if (orig in Const.FOLDER_IDS && target in Const.FOLDER_IDS && orig != target) {
+            if (orig in Const.FOLDER_IDS && c.isValidTarget(target) && orig != target) {
                 p.args[1] = target
+                if (Const.isCustomFolderId(target)) Lg.d("custom folder: $pkg $orig -> $target")
             }
         })
     }
@@ -254,10 +257,11 @@ internal object HiboardHooks {
         require(getters.isNotEmpty()) { "folder title getter not found" }
         getters.forEach { g ->
             XposedBridge.hookMethod(g, after("folderTitle") { p ->
-                if (cfg.folderNames.isEmpty()) return@after
+                val c = cfg
+                if (c.folderNames.isEmpty() && c.customFolders.isEmpty()) return@after
                 val f = idField ?: return@after
                 val id = f.getInt(p.thisObject)
-                cfg.customName(id)?.let { p.result = it }
+                c.folderTitle(id)?.let { p.result = it }
             })
         }
         Lg.i("folder title getters: ${getters.joinToString { it.name }}")

@@ -49,7 +49,17 @@ object Const {
         112 to "其他",
     )
     val FOLDER_IDS: Set<Int> = FOLDERS.map { it.first }.toSet()
+
+    /** 新建分类：id 从 1001 起（避开 100 建议、201–204 热门/推荐、302 等系统内部 id） */
+    const val CUSTOM_FOLDER_BASE = 1000
+    const val CUSTOM_FOLDER_MAX_ID = 9999
+    const val CUSTOM_FOLDER_LIMIT = 20
+    const val FOLDER_NAME_MAX = 12
+    fun isCustomFolderId(id: Int): Boolean = id in (CUSTOM_FOLDER_BASE + 1)..CUSTOM_FOLDER_MAX_ID
 }
+
+/** 用户新建的资源库分类 */
+data class CustomFolder(val id: Int, val name: String)
 
 /** 荣耀搜索相关设置 */
 object SearchKeys {
@@ -157,6 +167,8 @@ data class SearchCfg(
     /** key → SCOPE_FOLLOW / ON / OFF */
     val scope: Map<String, Int> = emptyMap(),
     val hideTabs: Set<Long> = emptySet(),
+    /** 结果页只保留「本机」标签：去掉标签栏，默认显示本机结果 */
+    val onlyLocal: Boolean = true,
     val engine: Int = SearchKeys.ENGINE_FOLLOW,
     val engineUrl: String = "",
     val externalBrowser: Boolean = false,
@@ -172,6 +184,7 @@ data class SearchCfg(
         put("hideAi", hideAi)
         put("scope", JSONObject().apply { scope.forEach { (k, v) -> if (v != SearchKeys.SCOPE_FOLLOW) put(k, v) } })
         put("hideTabs", JSONArray(hideTabs.sorted()))
+        put("onlyLocal", onlyLocal)
         put("engine", engine)
         put("engineUrl", engineUrl)
         put("externalBrowser", externalBrowser)
@@ -200,6 +213,7 @@ data class SearchCfg(
                 hideAi = o.optBoolean("hideAi", false),
                 scope = scope,
                 hideTabs = tabs,
+                onlyLocal = o.optBoolean("onlyLocal", true),
                 engine = o.optInt("engine", 0).coerceIn(0, 4),
                 engineUrl = o.optString("engineUrl", ""),
                 externalBrowser = o.optBoolean("externalBrowser", false),
@@ -219,9 +233,38 @@ data class LpConfig(
     /** 重启作用域时优先使用 root（am force-stop） */
     val useRoot: Boolean = false,
     val search: SearchCfg = SearchCfg(),
+    /** 新建分类（按创建顺序） */
+    val customFolders: List<CustomFolder> = emptyList(),
+    /** 已分配过的最大自定义分类 id，删除后不复用 */
+    val folderSeq: Int = Const.CUSTOM_FOLDER_BASE,
     val ts: Long = 0L,
 ) {
     fun customName(folderId: Int): String? = folderNames[folderId]?.takeIf { it.isNotBlank() }
+
+    fun customFolder(id: Int): CustomFolder? = customFolders.firstOrNull { it.id == id }
+
+    /** hook 中使用：自定义改名或新建分类的名称 */
+    fun folderTitle(id: Int): String? = customName(id) ?: customFolder(id)?.name
+
+    /** 模块界面显示用名称（系统分类显示改名后名称） */
+    fun displayName(id: Int): String =
+        customName(id) ?: customFolder(id)?.name ?: Const.FOLDERS.firstOrNull { it.first == id }?.second ?: id.toString()
+
+    fun isValidTarget(id: Int): Boolean = id in Const.FOLDER_IDS || customFolder(id) != null
+
+    fun nextFolderId(): Int = maxOf(folderSeq, customFolders.maxOfOrNull { it.id } ?: Const.CUSTOM_FOLDER_BASE) + 1
+
+    fun withNewFolder(name: String): Pair<LpConfig, Int> {
+        val id = nextFolderId()
+        return copy(customFolders = customFolders + CustomFolder(id, name), folderSeq = id) to id
+    }
+
+    fun renameFolder(id: Int, name: String): LpConfig =
+        copy(customFolders = customFolders.map { if (it.id == id) it.copy(name = name) else it })
+
+    /** 删除分类：其中的应用回到系统分类（去掉映射） */
+    fun deleteFolder(id: Int): LpConfig =
+        copy(customFolders = customFolders.filter { it.id != id }, mapping = mapping.filterValues { it != id })
 
     /** 上滑打开荣耀搜索只在开启右侧入口时生效（否则资源库将无法进入） */
     val swipeUpSearchActive: Boolean get() = rightEntry && swipeUpSearch
@@ -237,6 +280,8 @@ data class LpConfig(
         put("swipeUpSearch", swipeUpSearch)
         put("useRoot", useRoot)
         put("search", search.toJson())
+        put("customFolders", JSONArray().apply { customFolders.forEach { put(JSONObject().put("id", it.id).put("name", it.name)) } })
+        put("folderSeq", folderSeq)
     }.toString()
 
     companion object {
@@ -248,8 +293,22 @@ data class LpConfig(
                 o.optJSONArray("hidden")?.let { a -> for (i in 0 until a.length()) a.optString(i).takeIf { it.isNotEmpty() }?.let(hidden::add) }
                 val names = HashMap<Int, String>()
                 o.optJSONObject("folderNames")?.let { n -> n.keys().forEach { k -> k.toIntOrNull()?.let { id -> names[id] = n.optString(k) } } }
+                val folders = ArrayList<CustomFolder>()
+                o.optJSONArray("customFolders")?.let { a ->
+                    for (i in 0 until a.length()) {
+                        val f = a.optJSONObject(i) ?: continue
+                        val id = f.optInt("id", -1)
+                        val name = f.optString("name", "").replace("\n", "").trim().take(Const.FOLDER_NAME_MAX)
+                        if (!Const.isCustomFolderId(id) || name.isEmpty() || folders.any { it.id == id }) continue
+                        if (folders.size >= Const.CUSTOM_FOLDER_LIMIT) break
+                        folders += CustomFolder(id, name)
+                    }
+                }
+                val customIds = folders.map { it.id }.toSet()
                 val mapping = HashMap<String, Int>()
-                o.optJSONObject("mapping")?.let { m -> m.keys().forEach { k -> val v = m.optInt(k, -1); if (v in Const.FOLDER_IDS) mapping[k] = v } }
+                o.optJSONObject("mapping")?.let { m ->
+                    m.keys().forEach { k -> val v = m.optInt(k, -1); if (v in Const.FOLDER_IDS || v in customIds) mapping[k] = v }
+                }
                 LpConfig(
                     hidden = hidden,
                     folderNames = names,
@@ -259,6 +318,8 @@ data class LpConfig(
                     swipeUpSearch = o.optBoolean("swipeUpSearch", false),
                     useRoot = o.optBoolean("useRoot", false),
                     search = SearchCfg.fromJson(o.optJSONObject("search")),
+                    customFolders = folders,
+                    folderSeq = o.optInt("folderSeq", Const.CUSTOM_FOLDER_BASE).coerceIn(Const.CUSTOM_FOLDER_BASE, Const.CUSTOM_FOLDER_MAX_ID),
                     ts = o.optLong("ts", 0L),
                 )
             } catch (_: Throwable) {

@@ -70,12 +70,12 @@ object AppRepo {
 }
 
 @Composable
-fun AppIcon(pkg: String, modifier: Modifier = Modifier) {
+fun AppIcon(pkg: String, modifier: Modifier = Modifier, size: androidx.compose.ui.unit.Dp = 40.dp) {
     val ctx = LocalContext.current
     var bmp by remember(pkg) { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(pkg) { bmp = AppRepo.icon(ctx, pkg) }
-    Box(modifier.size(40.dp)) {
-        bmp?.let { Image(bitmap = it, contentDescription = null, modifier = Modifier.size(40.dp)) }
+    Box(modifier.size(size)) {
+        bmp?.let { Image(bitmap = it, contentDescription = null, modifier = Modifier.size(size)) }
     }
 }
 

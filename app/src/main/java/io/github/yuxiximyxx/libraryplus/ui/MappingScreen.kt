@@ -41,10 +41,10 @@ fun MappingScreen(cfg: LpConfig, update: ((LpConfig) -> LpConfig) -> Unit, onBac
     val real = remember(statusVersion) { StatusStore.categories(ctx) }
     val syncTime = remember(statusVersion) { StatusStore.categoriesTime(ctx) }
 
-    // 下拉项：默认 + 12 个分类（显示自定义名称）
-    fun nameOf(id: Int): String = cfg.customName(id) ?: Const.FOLDERS.firstOrNull { it.first == id }?.second ?: id.toString()
-    val options = listOf("默认") + Const.FOLDERS.map { (id, _) -> nameOf(id) }
-    val ids = listOf(-1) + Const.FOLDERS.map { it.first }
+    // 下拉项：默认 + 12 个系统分类（显示自定义名称）+ 新建分类
+    fun nameOf(id: Int): String = cfg.displayName(id)
+    val ids = listOf(-1) + Const.FOLDERS.map { it.first } + cfg.customFolders.map { it.id }
+    val options = listOf("默认") + ids.drop(1).map { id -> if (Const.isCustomFolderId(id)) "${nameOf(id)}（新建）" else nameOf(id) }
 
     MiuixPage(title = "自定义分类", onBack = onBack) {
         item {
