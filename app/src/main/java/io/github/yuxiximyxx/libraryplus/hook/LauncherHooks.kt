@@ -25,6 +25,12 @@ internal object LauncherHooks {
     private const val WORKSPACE = "$P.Workspace"
     private const val DRAG_LAYER = "$P.DragLayer"
     private const val FOLDER_MANAGER = "$P.folder.FolderManager"
+    private const val LAUNCHER = "$P.Launcher"
+    private const val LAUNCHER_STATE = "com.android.launcher3.LauncherState"
+    private const val RECENTS_ANIM_UTILS = "$P.quickstep.util.RecentsAnimUtils"
+    private const val LAUNCHER_ANIM_UTILS = "$P.animutils.LauncherAnimUtils"
+    private const val DESKTOP_UTILS = "$P.extension.hndesktop.HnDesktopUtils"
+    private const val MANUAL_STACK = "$P.manualstack.ManualStackManager"
 
     private lateinit var cl: ClassLoader
     private var appContext: Context? = null
@@ -108,6 +114,13 @@ internal object LauncherHooks {
         null
     }
 
+    private fun workspaceDragLayer(ws: Any?): Any? = try {
+        val launcher = ws?.let { XposedHelpers.getObjectField(it, "mLauncher") }
+        launcher?.let { XposedHelpers.callMethod(it, "getDragLayer") }
+    } catch (_: Throwable) {
+        null
+    }
+
     private fun isDragging(dragLayer: Any?): Boolean = try {
         val dc = dragLayer?.let { XposedHelpers.getObjectField(it, "mDragController") }
             ?: XposedHelpers.callStaticMethod(XposedHelpers.findClass("$P.Launcher", cl), "getLauncher")
@@ -120,8 +133,9 @@ internal object LauncherHooks {
     /**
      * 是否处于“最后一页、普通模式、可以进入资源库”的状态。返回 Workspace 的 state，否则返回 null 并给出原因。
      */
-    private fun lastPageState(ws: Any?): Pair<Any?, String?> {
+    private fun lastPageState(ws: Any?, dragLayer: Any? = null): Pair<Any?, String?> {
         if (ws == null) return null to "no workspace"
+        homeBlockReason(dragLayer)?.let { return null to it }
         if (XposedHelpers.getBooleanField(ws, "mIsRtl")) return null to "rtl"
         if (XposedHelpers.callMethod(ws, "isLastPage") != true) return null to "not last page"
         val state = XposedHelpers.callMethod(ws, "getState")
@@ -134,6 +148,52 @@ internal object LauncherHooks {
         return state to null
     }
 
+    private fun staticBool(cls: String, method: String): Boolean =
+        XposedHelpers.callStaticMethod(XposedHelpers.findClass(cls, cl), method) == true
+
+    /**
+     * 桌面是否处于“普通桌面、静止、无覆盖层”的状态；返回阻止原因，null 表示可以。
+     * 任何一项无法判断（异常）都视为不可以（fail-safe）。
+     * 多任务（OVERVIEW / BACKGROUND_APP / QUICK_SWITCH_FROM_HOME / OVERVIEW_MODAL_TASK）、所有应用（ALL_APPS）、
+     * 双指捏合编辑（HintState）以及它们之间的过渡动画都属于非 NORMAL 或 isInTransition。
+     */
+    private fun homeBlockReason(dragLayer: Any?): String? {
+        return try {
+            val launcher = (dragLayer?.let { try { XposedHelpers.getObjectField(it, "mLauncher") } catch (_: Throwable) { null } })
+                ?: XposedHelpers.callStaticMethod(XposedHelpers.findClass(LAUNCHER, cl), "getLauncher")
+                ?: return "no launcher"
+            val normal = XposedHelpers.getStaticObjectField(XposedHelpers.findClass(LAUNCHER_STATE, cl), "NORMAL")
+            val sm = XposedHelpers.callMethod(launcher, "getStateManager") ?: return "no state manager"
+            val st = XposedHelpers.callMethod(sm, "getState")
+            if (st !== normal) return "launcherState=$st"
+            if (XposedHelpers.callMethod(sm, "isInStableState", normal) != true) return "state not stable"
+            if (XposedHelpers.callMethod(sm, "isInTransition") == true) return "state in transition"
+            if (staticBool(RECENTS_ANIM_UTILS, "isOverviewState")) return "overview"
+            if (staticBool(RECENTS_ANIM_UTILS, "isBackGroundAppState")) return "background app"
+            if (staticBool(RECENTS_ANIM_UTILS, "isQuickSwitchState")) return "quick switch"
+            if (staticBool(RECENTS_ANIM_UTILS, "isHomeOverviewState")) return "home overview (hint)"
+            val recents = XposedHelpers.callMethod(launcher, "getRecentOverviewPanel") as? android.view.View
+            if (recents != null && recents.visibility == android.view.View.VISIBLE) return "recents visible"
+            for (m in listOf("isRecentAnimationDoing", "isEnterRecentsAnimationDoing", "isRecentTransitionAnimRunning",
+                "isRecentRemovingAnimationDoing", "isWaitingRecentFinishCallback")) {
+                if (staticBool(LAUNCHER_ANIM_UTILS, m)) return "anim: $m"
+            }
+            if (XposedHelpers.callStaticMethod(XposedHelpers.findClass(LAUNCHER_ANIM_UTILS, cl), "getBackHomeAnimatioStatus") == true) return "back-home anim"
+            if (staticBool(DESKTOP_UTILS, "isInDesktopMode")) return "desktop mode"
+            val ms = XposedHelpers.callStaticMethod(XposedHelpers.findClass(MANUAL_STACK, cl), "getInstance")
+            val group = XposedHelpers.callMethod(ms, "findManualStackExpandGroup") as? java.util.Optional<*>
+            if (group?.isPresent == true) return "manual stack expanded"
+            if (dragLayer != null && XposedHelpers.getBooleanField(dragLayer, "isAnimRunning")) return "app launch anim"
+            if (XposedHelpers.callMethod(launcher, "isMultiChoiceMode") == true) return "multi choice"
+            // 负一屏、锁屏、通知栏、其它窗口覆盖时桌面没有焦点
+            if ((launcher as? android.app.Activity)?.hasWindowFocus() != true) return "no window focus"
+            null
+        } catch (t: Throwable) {
+            Lg.e("homeBlockReason: cannot determine launcher state, skip", t)
+            "state unknown"
+        }
+    }
+
     /**
      * 尝试从最后一页打开资源库。dx/dy 为相对按下点的位移（View 坐标）。
      * @return true 表示已经交给资源库（调用方应拦截本次事件）
@@ -143,9 +203,9 @@ internal object LauncherHooks {
         val threshold = max(dp(ctx, 10f), XposedHelpers.getIntField(ws ?: return false, "mTouchSlop").toFloat())
         if (dx > -threshold || abs(dx) <= abs(dy) * 1.2f) return false
         attemptedDownTime = ev.downTime
-        val (state, why) = lastPageState(ws)
+        val (state, why) = lastPageState(ws, dragLayer)
         if (state == null) {
-            Lg.d("rightEntry[$source]: skip ($why)")
+            if (why == "not last page") Lg.d("rightEntry[$source]: skip ($why)") else Lg.i("rightEntry[$source]: skip ($why)")
             return false
         }
         if (ev.pointerCount > 1) { Lg.i("rightEntry[$source]: skip (multi touch)"); return false }
@@ -213,7 +273,7 @@ internal object LauncherHooks {
                     val dx = ev.x - XposedHelpers.getFloatField(ws, "mDownMotionX")
                     val dy = ev.y - XposedHelpers.getFloatField(ws, "mDownMotionY")
                     if (dx >= 0 || abs(dx) < abs(dy)) return@before
-                    val (state, _) = lastPageState(ws)
+                    val (state, _) = lastPageState(ws, workspaceDragLayer(ws))
                     if (state == null || !libraryEnabled()) return@before
                     if (tryOpen("Workspace", ev, dx, dy, ws, null, (ws as? android.view.View)?.context)) {
                         p.result = null

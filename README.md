@@ -7,7 +7,7 @@
 - 适配版本：桌面 18.0.0.331、资源库（hiboard）11.1.4.302、荣耀搜索 10.0.37.301；其它版本尽量通过 DexKit 自动适配
 - 日志 TAG：`LibraryPlus`（`adb logcat -s LibraryPlus`，也会写入 LSPosed 日志）。每个进程加载后输出一行：`LibraryPlus loaded in <包名>, hooks ok: [...], failed: [...]`
 
-## 功能（v0.1.3）
+## 功能（v0.1.4）
 
 | 功能 | 说明 |
 | --- | --- |
@@ -59,6 +59,7 @@ keyPassword=******
   - `ResourceLibUtil.getAllAppList()`：从返回的 Bundle `value` 列表中移除隐藏应用
   - `DragLayer.handleResourceLibEnter()`：最后一页向左的横向手势调用 `HiBoardUtil.scrollToHiLibrary()` 并拦截（与上滑进入同一入口）
   - `Workspace.determineScrollingStart()`：最后一页向左时不开始翻页，并作为兜底入口
+  - 左滑进入只在普通桌面静止状态触发：`LauncherState.NORMAL` 且稳定、无状态过渡；不在多任务（OVERVIEW / BACKGROUND_APP / QUICK_SWITCH）、捏合编辑、所有应用、文件夹/堆叠展开、多选、电脑模式、应用启动/回桌面/进多任务动画中；桌面需有窗口焦点（负一屏、锁屏、通知栏时不触发）；状态无法判断时不触发
   - `HiBoardClientManager.onTouchEvent()` / `resetTouchEvent()`：把向左的位移换算成向上的位移，复用原有的上滑打开逻辑
   - 配置变化后调用 `ResourceLibUtil.notifyChangeToResourceLibraryNodelay()` 让资源库重新加载
 - 资源库 hiboard（部分混淆，用 DexKit 按日志字符串定位，结果按 APK 指纹缓存）
