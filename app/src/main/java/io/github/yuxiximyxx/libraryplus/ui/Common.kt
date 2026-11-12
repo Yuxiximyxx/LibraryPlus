@@ -46,6 +46,7 @@ val BackIcon: ImageVector by lazy {
 fun MiuixPage(
     title: String,
     onBack: (() -> Unit)?,
+    extras: @Composable () -> Unit = {},
     content: LazyListScope.() -> Unit,
 ) {
     val scroll = MiuixScrollBehavior()
@@ -74,5 +75,7 @@ fun MiuixPage(
             content()
             item { Spacer(Modifier.height(8.dp)) }
         }
+        // SuperDialog 必须放在 Scaffold 内容槽内，才能写到 MiuixPopupHost 的 LocalDialogStates
+        extras()
     }
 }

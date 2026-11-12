@@ -125,7 +125,31 @@ fun CustomFoldersScreen(
     var creating by remember { mutableStateOf(false) }
     val full = cfg.customFolders.size >= Const.CUSTOM_FOLDER_LIMIT
 
-    MiuixPage(title = "新建分类", onBack = onBack) {
+    MiuixPage(
+        title = "新建分类",
+        onBack = onBack,
+        extras = {
+            FolderNameDialog(
+                show = creating,
+                title = "新建分类",
+                initial = "",
+                confirmText = "下一步",
+                cfg = cfg,
+                selfId = null,
+                onDismiss = { creating = false },
+                onConfirm = { name ->
+                    creating = false
+                    if (cfg.customFolders.size >= Const.CUSTOM_FOLDER_LIMIT) {
+                        Toast.makeText(ctx, "最多 ${Const.CUSTOM_FOLDER_LIMIT} 个分类", Toast.LENGTH_SHORT).show()
+                    } else {
+                        var newId = -1
+                        update { c -> c.withNewFolder(name).also { newId = it.second }.first }
+                        if (newId > 0) open("folder:$newId")
+                    }
+                },
+            )
+        },
+    ) {
         item { SmallTitle("我的分类 · 在资源库中长按文件夹可拖动排序") }
         if (cfg.customFolders.isEmpty()) {
             item {
@@ -171,26 +195,6 @@ fun CustomFoldersScreen(
             )
         }
     }
-
-    FolderNameDialog(
-        show = creating,
-        title = "新建分类",
-        initial = "",
-        confirmText = "下一步",
-        cfg = cfg,
-        selfId = null,
-        onDismiss = { creating = false },
-        onConfirm = { name ->
-            creating = false
-            if (cfg.customFolders.size >= Const.CUSTOM_FOLDER_LIMIT) {
-                Toast.makeText(ctx, "最多 ${Const.CUSTOM_FOLDER_LIMIT} 个分类", Toast.LENGTH_SHORT).show()
-            } else {
-                var newId = -1
-                update { c -> c.withNewFolder(name).also { newId = it.second }.first }
-                if (newId > 0) open("folder:$newId")
-            }
-        },
-    )
 }
 
 @Composable
@@ -220,7 +224,47 @@ fun FolderDetailScreen(
 
     fun origin(pkg: String): String = real[pkg]?.let { cfg.displayName(it) } ?: "未同步"
 
-    MiuixPage(title = folder.name, onBack = onBack) {
+    MiuixPage(
+        title = folder.name,
+        onBack = onBack,
+        extras = {
+            FolderNameDialog(
+                show = renaming,
+                title = "重命名分类",
+                initial = folder.name,
+                confirmText = "确定",
+                cfg = cfg,
+                selfId = folderId,
+                onDismiss = { renaming = false },
+                onConfirm = { name ->
+                    renaming = false
+                    update { it.renameFolder(folderId, name) }
+                },
+            )
+
+            SuperDialog(
+                show = deleting,
+                title = "删除「${folder.name}」",
+                summary = if (count > 0) "其中的 $count 个应用会回到原来的系统分类。" else "该分类中没有应用。",
+                onDismissRequest = { deleting = false },
+            ) {
+                Row(Modifier.fillMaxWidth()) {
+                    TextButton(text = "取消", onClick = { deleting = false }, modifier = Modifier.weight(1f))
+                    Spacer(Modifier.width(12.dp))
+                    TextButton(
+                        text = "删除",
+                        onClick = {
+                            deleting = false
+                            update { it.deleteFolder(folderId) }
+                            onBack()
+                        },
+                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        },
+    ) {
         item {
             Card(Modifier.padding(horizontal = 12.dp).padding(bottom = 6.dp).fillMaxWidth()) {
                 SuperArrow(
@@ -276,42 +320,6 @@ fun FolderDetailScreen(
                 onClick = { deleting = true },
                 colors = ButtonDefaults.textButtonColors(),
                 modifier = Modifier.padding(horizontal = 12.dp).padding(top = 16.dp).fillMaxWidth(),
-            )
-        }
-    }
-
-    FolderNameDialog(
-        show = renaming,
-        title = "重命名分类",
-        initial = folder.name,
-        confirmText = "确定",
-        cfg = cfg,
-        selfId = folderId,
-        onDismiss = { renaming = false },
-        onConfirm = { name ->
-            renaming = false
-            update { it.renameFolder(folderId, name) }
-        },
-    )
-
-    SuperDialog(
-        show = deleting,
-        title = "删除「${folder.name}」",
-        summary = if (count > 0) "其中的 $count 个应用会回到原来的系统分类。" else "该分类中没有应用。",
-        onDismissRequest = { deleting = false },
-    ) {
-        Row(Modifier.fillMaxWidth()) {
-            TextButton(text = "取消", onClick = { deleting = false }, modifier = Modifier.weight(1f))
-            Spacer(Modifier.width(12.dp))
-            TextButton(
-                text = "删除",
-                onClick = {
-                    deleting = false
-                    update { it.deleteFolder(folderId) }
-                    onBack()
-                },
-                colors = ButtonDefaults.textButtonColorsPrimary(),
-                modifier = Modifier.weight(1f),
             )
         }
     }

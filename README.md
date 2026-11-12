@@ -7,7 +7,7 @@
 - 适配版本：桌面 18.0.0.331、资源库（hiboard）11.1.4.302、荣耀搜索 10.0.37.301；其它版本尽量通过 DexKit 自动适配
 - 日志 TAG：`LibraryPlus`（`adb logcat -s LibraryPlus`，也会写入 LSPosed 日志）。每个进程加载后输出一行：`LibraryPlus loaded in <包名>, hooks ok: [...], failed: [...]`
 
-## 功能（v0.1.4）
+## 功能（v0.1.5）
 
 | 功能 | 说明 |
 | --- | --- |

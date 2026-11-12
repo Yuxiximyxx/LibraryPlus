@@ -45,7 +45,38 @@ fun HomeScreen(
     var confirm by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
 
-    MiuixPage(title = "资源库增强", onBack = null) {
+    MiuixPage(
+        title = "资源库增强",
+        onBack = null,
+        extras = {
+            SuperDialog(
+                show = confirm,
+                title = "重启作用域",
+                summary = "将重启桌面、资源库和荣耀搜索，桌面会短暂黑屏。" + if (cfg.useRoot) "\n将先尝试 root。" else "",
+                onDismissRequest = { confirm = false },
+            ) {
+                Row(Modifier.fillMaxWidth()) {
+                    TextButton(text = "取消", onClick = { confirm = false }, modifier = Modifier.weight(1f))
+                    Spacer(Modifier.width(12.dp))
+                    TextButton(
+                        text = "重启",
+                        onClick = {
+                            confirm = false
+                            busy = true
+                            val useRoot = cfg.useRoot
+                            scope.launch {
+                                val msg = withContext(Dispatchers.IO) { ScopeControl.restart(ctx.applicationContext, useRoot) }
+                                busy = false
+                                Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        },
+    ) {
         if (!moduleActive) {
             item {
                 Card(Modifier.padding(horizontal = 12.dp).padding(bottom = 6.dp).fillMaxWidth()) {
@@ -164,33 +195,6 @@ fun HomeScreen(
                 modifier = Modifier.padding(horizontal = 28.dp, vertical = 12.dp),
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 style = MiuixTheme.textStyles.footnote1,
-            )
-        }
-    }
-
-    SuperDialog(
-        show = confirm,
-        title = "重启作用域",
-        summary = "将重启桌面、资源库和荣耀搜索，桌面会短暂黑屏。" + if (cfg.useRoot) "\n将先尝试 root。" else "",
-        onDismissRequest = { confirm = false },
-    ) {
-        Row(Modifier.fillMaxWidth()) {
-            TextButton(text = "取消", onClick = { confirm = false }, modifier = Modifier.weight(1f))
-            Spacer(Modifier.width(12.dp))
-            TextButton(
-                text = "重启",
-                onClick = {
-                    confirm = false
-                    busy = true
-                    val useRoot = cfg.useRoot
-                    scope.launch {
-                        val msg = withContext(Dispatchers.IO) { ScopeControl.restart(ctx.applicationContext, useRoot) }
-                        busy = false
-                        Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
-                    }
-                },
-                colors = ButtonDefaults.textButtonColorsPrimary(),
-                modifier = Modifier.weight(1f),
             )
         }
     }
